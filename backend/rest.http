@@ -1,0 +1,24 @@
+### test
+GET http://localhost:8911/test
+
+### register
+POST http://localhost:8911/api/v1/user/register
+Content-Type:  application/json
+
+{
+    "fullName": "sadasiv",
+    "email": "email3@mail.com",
+    "password": "P@$$w0rdd",
+    "passwordVerify": "P@$$w0rdd"
+}
+
+### login
+POST http://localhost:8911/api/v1/user/login
+Content-Type:  application/json
+
+{
+    "email": "email3@mail.com",
+    "password": "P@$$w0rdd"
+}
+
+
