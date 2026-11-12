@@ -1,90 +1,116 @@
 const express = require("express");
-const router = express.Router();
-const User = require("../models/user.model");
 const bcrypt = require("bcryptjs");
-const jwt = require("jsonwebtoken");
-const JWT_SECRET = "4BLgN3)7~oEu8SKz6p8K";
+const User = require("../models/user.model");
 const auth = require("../middlewares/auth.middleware");
+const { clearAuthCookie, issueAuthToken, setAuthCookie } = require("../utilities/authToken");
+
+const router = express.Router();
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+const FULL_NAME_PATTERN = /^[\p{L}][\p{L}\p{M}' -]*$/u;
+
+function normalizeEmail(value) {
+    return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
+function publicUser(user) {
+    return {
+        id: String(user._id),
+        fullName: user.fullName,
+        email: user.email,
+        userName: user.userName || "",
+    };
+}
+
+function isValidEmail(email) {
+    return email.length <= 254 && EMAIL_PATTERN.test(email);
+}
 
 router.post("/register", async (req, res) => {
+    const fullName = typeof req.body?.fullName === "string"
+        ? req.body.fullName.trim().replace(/\s+/g, " ")
+        : "";
+    const email = normalizeEmail(req.body?.email);
+    const password = typeof req.body?.password === "string" ? req.body.password : "";
+    const passwordVerify = typeof req.body?.passwordVerify === "string" ? req.body.passwordVerify : "";
+
+    if (!fullName || !email || !password || !passwordVerify) {
+        return res.status(400).json({ success: false, message: "Please complete all required fields." });
+    }
+    if (fullName.length < 2 || fullName.length > 60 || !FULL_NAME_PATTERN.test(fullName)) {
+        return res.status(400).json({ success: false, message: "Enter a name between 2 and 60 letters." });
+    }
+    if (!isValidEmail(email)) {
+        return res.status(400).json({ success: false, message: "Enter a valid email address." });
+    }
+    if (Buffer.byteLength(password, "utf8") < 8 || Buffer.byteLength(password, "utf8") > 72) {
+        return res.status(400).json({ success: false, message: "Password must be between 8 and 72 bytes." });
+    }
+    if (password !== passwordVerify) {
+        return res.status(400).json({ success: false, message: "Passwords do not match." });
+    }
+
     try {
-        res.cookie("token", "", { httpOnly: true, expiresIn: new Date(0) });
-
-        const { fullName, email, password, passwordVerify } = req.body;
-        console.log(fullName, email, password, passwordVerify);
-
-        if (!fullName || !email || !password || !passwordVerify) {
-            return res.json({ success: false, message: "Please enter all required fields." });
-        }
-
-        const fullNameRegex = /[^a-zA-Z ]/ig;
-        const value = fullName.replace(fullNameRegex, "").slice(0, 30);
-        if (value.length < 3) {
-            return res.json({ success: false, message: "Min: 3 Char, Max: 30  Char, A-Za-z and space" });
-        }
-
-        const emailRegex = /^[a-zA-Z0-9.!#$%&’*+/=?^_`{|}~-]+@[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*$/;
-        if (!emailRegex.test(email)) {
-            return res.status(400).json({ success: false, message: "Invalid email address." });
-        }
-
-        const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,10}$/;
-        if (!passwordRegex.test(password)) {
-            return res.status(400).json({ success: false, message: "Password minimum eight and maximum 10 characters, at least one uppercase letter, one lowercase letter, one number and one special character required." });
-        }
-
-        if (password !== passwordVerify) {
-            return res.status(400).json({ success: false, message: "Passwords do not match." });
-        }
-
-        const existingUser = await User.findOne({ email });
+        const existingUser = await User.findOne({ email }).select("_id").lean();
         if (existingUser) {
-            return res.json({ success: false, message: "Email already registered." });
+            return res.status(409).json({ success: false, message: "An account with this email already exists." });
         }
 
-        const salt = await bcrypt.genSalt();
-        const passwordHash = await bcrypt.hash(password, salt);
-        const newUser = new User({ fullName, email, passwordHash });
-        const savedUser = await newUser.save();
-        const token = jwt.sign({ user: savedUser._id }, JWT_SECRET);
-        console.log(token, "token");
-        res.cookie("token", token, { httpOnly: true });
-        res.json({ success: true, message: "User added successfully." });
+        const passwordHash = await bcrypt.hash(password, 12);
+        const user = await User.create({ fullName, email, passwordHash });
+        setAuthCookie(res, issueAuthToken(user._id));
+        return res.status(201).json({
+            success: true,
+            message: "Your account is ready.",
+            user: publicUser(user),
+        });
     } catch (error) {
-        console.error(error);
-        res.json({ success: false, message: error.message });
+        if (error.code === 11000) {
+            return res.status(409).json({ success: false, message: "An account with this email already exists." });
+        }
+        console.error("Registration failed:", error);
+        return res.status(500).json({ success: false, message: "Unable to create your account right now." });
     }
 });
 
 router.post("/login", async (req, res) => {
-    try {
-        res.cookie("token", "", { httpOnly: true, expiresIn: new Date(0) });
-        const { email, password } = req.body;
-        console.log(email, password, "login");
-
-        if (!email || !password) {
-            return res.json({ success: false, message: "Please enter all required fields." });
-        }
-
-        const existingUser = await User.findOne({ email });
-        console.log(existingUser, "existinguse");
-        if (!existingUser) {
-            return res.json({ success: false, message: "Invalid email address" });
-        }
-
-        const isPasswordCorrect = await bcrypt.compare(password, existingUser.passwordHash);
-        console.log(isPasswordCorrect, "isPasswordCorrect");;
-        if (!isPasswordCorrect) {
-            return res.json({ success: false, message: "Incorrect password" });
-        }
-
-        const token = jwt.sign({ user: existingUser._id }, JWT_SECRET);
-        res.cookie("token", token, { httpOnly: true });
-        res.json({ success: true, message: "Logged in successfully" });
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ success: false, message: error.message });
+    const email = normalizeEmail(req.body?.email);
+    const password = typeof req.body?.password === "string" ? req.body.password : "";
+    if (!email || !password || !isValidEmail(email)) {
+        return res.status(400).json({ success: false, message: "Enter a valid email and password." });
     }
+
+    try {
+        const user = await User.findOne({ email });
+        const passwordMatches = user && await bcrypt.compare(password, user.passwordHash);
+        if (!passwordMatches) {
+            return res.status(401).json({ success: false, message: "Email or password is incorrect." });
+        }
+
+        setAuthCookie(res, issueAuthToken(user._id));
+        return res.json({ success: true, message: "You are signed in.", user: publicUser(user) });
+    } catch (error) {
+        console.error("Login failed:", error);
+        return res.status(500).json({ success: false, message: "Unable to sign in right now." });
+    }
+});
+
+router.get("/me", auth, async (req, res) => {
+    try {
+        const user = await User.findById(req.userId).select("_id fullName email userName").lean();
+        if (!user) {
+            clearAuthCookie(res);
+            return res.status(401).json({ success: false, message: "Session is no longer valid." });
+        }
+        return res.json({ success: true, user: publicUser(user) });
+    } catch (error) {
+        console.error("Session lookup failed:", error);
+        return res.status(500).json({ success: false, message: "Unable to check your session right now." });
+    }
+});
+
+router.post("/logout", (req, res) => {
+    clearAuthCookie(res);
+    return res.json({ success: true, message: "You are signed out." });
 });
 
 module.exports = router;

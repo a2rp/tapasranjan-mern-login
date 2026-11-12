@@ -1,21 +1,21 @@
 const jwt = require("jsonwebtoken");
-const JWT_SECRET = "4BLgN3)7~oEu8SKz6p8K";
+const { TOKEN_ISSUER, getJwtSecret } = require("../utilities/authToken");
 
 const auth = (req, res, next) => {
+    const token = req.cookies?.token;
+    if (!token) {
+        return res.status(401).json({ success: false, message: "Authentication required." });
+    }
+
     try {
-        const token = req.cookies.token;
-        // console.log(token, "token");
-        if (!token) {
-            return res.status(401).json({ success: false, message: "Unauthorised" });
+        const verified = jwt.verify(token, getJwtSecret(), { issuer: TOKEN_ISSUER });
+        if (typeof verified.sub !== "string") {
+            return res.status(401).json({ success: false, message: "Invalid or expired session." });
         }
-        const verified = jwt.verify(token, JWT_SECRET);
-        // console.log(verified, "verified");
-        req.user = verified.user;
-        req.email = verified.email;
-        next();
-    } catch (error) {
-        console.log(error);
-        res.status(401).json({ success: false, message: error.message });
+        req.userId = verified.sub;
+        return next();
+    } catch {
+        return res.status(401).json({ success: false, message: "Invalid or expired session." });
     }
 };
 

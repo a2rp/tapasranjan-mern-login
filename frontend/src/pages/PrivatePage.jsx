@@ -1,30 +1,18 @@
-import axios from 'axios';
-import React, { useEffect } from 'react'
-
-const PrivatePage = () => {
-    const getUser = async () => {
-        const config = {
-            method: "GET",
-            url: "/user"
-        };
-
-        try {
-            const response = await axios(config);
-            console.log(response, "response user");
-            const value = response.data.message;
-        } catch (error) {
-            console.log(error);
-        }
-    };
-    useEffect(() => {
-        getUser();
-    }, []);
-
+function PrivatePage({ user, onLogout }) {
     return (
-        <div>
-            private page
-        </div>
-    )
+        <main className="auth-shell">
+            <section className="auth-card account-card" aria-labelledby="account-title">
+                <p className="auth-eyebrow">Private space</p>
+                <h1 id="account-title">You’re signed in, {user.fullName}.</h1>
+                <p className="auth-intro">Your session is protected by an HTTP-only authentication cookie.</p>
+                <div className="account-details">
+                    <span>Email address</span>
+                    <strong>{user.email}</strong>
+                </div>
+                <button className="primary-button" type="button" onClick={onLogout}>Sign out</button>
+            </section>
+        </main>
+    );
 }
 
-export default PrivatePage
+export default PrivatePage;
